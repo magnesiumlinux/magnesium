@@ -1,4 +1,4 @@
 magnesium
 =========
 
-build and install a linux kernel and busybox-based initrd
+just add busybox, lilo, and a linux kernel
