@@ -1,0 +1,4 @@
+missing:
+    terminfo database stub 
+    /etc/machines.d (machine profiles are busted)
+    /etc/runit/* (who belongs to us v. was copied in)    

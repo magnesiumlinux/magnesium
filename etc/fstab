@@ -1,0 +1,16 @@
+# kernel filesystems and temp 
+devtmpfs        /dev	     devtmpfs noexec,nosuid         0 0
+sysfs           /sys         sysfs    noexec,nosuid,nodev   0 0
+proc            /proc        proc     noexec,nosuid,nodev   0 0
+tmpfs           /tmp         tmpfs    noexec,nosuid,nodev   0 0
+
+# require userland intervention to create directories
+devpts	        /dev/pts     devpts   noauto,noexec,nosuid,gid=5,mode=620   0 0
+shm             /dev/shm     tmpfs    noauto,noexec,nosuid,nodev	    0 0
+
+# magnesium
+LABEL=MGUSR2    /usr         ext3     ro,noauto,noatime     0 0
+LABEL=MGBOOT    /boot	     ext3     noauto,noatime        0 0
+LABEL=MGBUILD   /build       ext3     noauto,exec,noatime   0 0
+LABEL=MGBACK    /backpack    vfat     noauto,noatime        0 0
+LABEL=MGVAULT   /vault       ext3     noauto,noexec,nosuid,nodev,noatime    0 0

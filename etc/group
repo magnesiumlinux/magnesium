@@ -1,0 +1,10 @@
+root:x:0:
+daemon:x:99:
+tty:x:5:
+wheel:x:10:root
+console:x:17:
+audio:x:18:
+storage:x:19:
+build:x:101:
+proc:x:191:root
+users:x:1000:

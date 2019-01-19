@@ -1,0 +1,8 @@
+PS1='\h:\w\$ '
+
+MANPATH=/usr/share/man
+for d in /opt/*; do
+    MANPATH=$MANPATH:$d/share/man
+done
+
+export PS1 MANPATH

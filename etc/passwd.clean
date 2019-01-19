@@ -1,0 +1,2 @@
+root:x:0:0::/:/bin/sh
+daemon:x:99:99::/dev/null:/bin/false

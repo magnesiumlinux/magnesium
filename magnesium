@@ -1,0 +1,236 @@
+#!/bin/sh
+## magnesium
+## a self-reproducing, minimal linux distribution
+##
+
+set -e                                                  # require caution
+set -u                                                  # throw lots of errors
+#set -x                                                 # turn on debugging
+
+
+## helpers
+
+err() {
+    echo "!" $* >&2
+    return 1
+}
+
+latest() {
+    # find the latest path $2
+    # in a set of paths with similar beginnings $1                                 
+    ls -rtd ${1}*/${2} | head -n 1
+}
+
+## configuration
+
+DATETAG=$(date +'%Y%m%d')
+
+MANIFEST_PATH="/magnesium.manifest"                     # must match kernel config
+MG_ROOT=                                                # path to source without leading slash
+MG_SRC=/build/tree/magnesium                            # sources live here
+MG_VAULT=/vault/magnesium                               # installation directory
+ARCH=x86                                                # should match kernel boot path
+
+for d in $MG_ROOT $MG_SRC $MG_VAULT; do
+    test -d $d || err "Not a directory: $d"
+done
+
+# trailing [0-9] trims stray tarballs and signatures
+mg_kver=$(latest $MG_SRC 'linux*[[0-9]' | xargs basename | sed 's/linux-//')  
+mg_devel=$(latest $MG_VAULT 'devel*.squashfs') # development tools can be mounted from here
+
+
+## manifest
+## generate the manifest linux uses to build the initramfs
+## to change the contents of the initramfs, make changes to the files in MG_ROOT
+## and re-run the manifest command.
+## this command is automatically run as part of the build stage
+
+mg_manifest() {
+    
+    local dirs="backpack bin build home mnt opt proc service sbin sys tmp usr var vault"
+    local etcfiles="fstab group ld-musl-i386.path lilo.conf passwd.clean profile sysctl.conf"
+    local services="syslogd klogd l0gin ntpd udhcpc_skel"
+
+    ## 
+    ## /
+    ##
+
+    echo "file /magnesium $MG_ROOT/magnesium 0755 0 0"
+
+    for d in $dirs; do
+        echo "dir /$d 0755 0 0"
+    done
+
+    ##
+    ## /bin
+    ##
+
+    echo "file /bin/busybox $MG_ROOT/bin/busybox 0755 0 0"
+    $MG_ROOT/bin/busybox --list-full | while read LINK; do 
+        echo "slink /$LINK /bin/busybox 0755 0 0"
+    done
+
+    echo "file /bin/machine.sh $MG_ROOT/bin/machine.sh 0755 0 0"
+    echo "file /bin/spor $MG_ROOT/bin/spor 0755 0 0"
+    echo "slink /bin/bash /usr/bin/bash 0755 0 0"
+   
+    ##
+    ## /sbin
+    ##
+
+    echo "file /sbin/init $MG_ROOT/sbin/init 0755 0 0"
+    echo "file /sbin/lilo $MG_ROOT/sbin/lilo 0755 0 0"
+    echo "slink /init /sbin/init 0755 0 0"
+
+    ##
+    ## /dev
+    ##
+
+    echo "dir /dev 0755 0 0"
+    echo "nod /dev/console 0600 0 0 c 5 1"
+
+    ##
+    ## /etc
+    ##
+
+    echo "dir /etc 0755 0 0"
+    echo "slink /etc/mtab /proc/mounts 0755 0 0"
+    echo "slink /etc/ssl /opt/net/etc/ssl 0755 0 0"    
+    for f in $etcfiles; do
+        echo "file /etc/$f $MG_ROOT/etc/$f 644 0 0"
+    done
+
+    # don't write ephemeral users to the rootfs
+    echo "file /etc/passwd $MG_ROOT/etc/passwd.clean 644 0 0"
+
+    echo "dir /etc/keys 0755 0 0"
+    echo "file /etc/keys/mg.pubkey.s0 $MG_ROOT/etc/keys/mg.pubkey.s0 644 0 0"
+    echo "file /etc/keys/mg.privkey.s0 $MG_ROOT/etc/keys/mg.privkey.s0 644 0 0"
+
+    echo "dir /etc/terminfo 0755 0 0"  
+    echo "dir /etc/terminfo/l 0755 0 0"
+    echo "file /etc/terminfo/l/linux $MG_ROOT/etc/terminfo/l/linux 0644 0 0"
+   
+    echo "dir /etc/machines.d 0755 0 0"
+    for f in $(ls /etc/machines.d/*.tar.bz2); do
+	echo "file $f $MG_ROOT/$f 0664 0 0"
+    done
+
+    echo "dir /etc/runit 0755 0 0"
+    for s in $services; do
+	local spath="etc/runit/$s"
+        test -d $MG_ROOT/$spath || err "svcs: no $s"
+        echo "dir /$spath 0755 0 0"
+        echo "file /$spath/run $MG_ROOT/$spath/run 0755 0 0"
+        for path in "$MG_ROOT/$spath/config*" ; do
+		test $path = $MG_ROOT/$spath/config\* && continue
+		local c=$(basename $path)
+   		echo "file /$spath/$c $MG_ROOT/$spath/$c 755 0 0"
+        done
+	if [ -e $MG_ROOT/$spath/log/run ]; then
+		echo "dir /$spath/log 0755 0 0"
+		echo "file /$spath/log/run $MG_ROOT/$spath/log/run 0755 0 0"
+	fi
+    done
+
+    ##
+    ## /var
+    ##
+    
+    echo "dir /var/tmp 0777 0 0"
+    echo "file /var/quoits.intro $MG_ROOT/var/quoits.intro 0644 0 0"
+
+    ##
+    ## loop.ko
+    ##
+
+    echo "dir /usr/lib 0755 0 0"
+    echo "dir /usr/lib/modules 0755 0 0"
+    echo "dir /usr/lib/modules/$mg_kver 0755 0 0"
+    echo "dir /usr/lib/modules/$mg_kver/extra 0755 0 0"
+    echo "file /usr/lib/modules/$mg_kver/extra/loop.ko \
+           $MG_ROOT/lib/modules/$mg_kver/extra/loop.ko 0755 0 0"
+
+    ##
+    ## misc
+    ## 
+
+    echo "slink /lib /usr/lib 0755 0 0"
+    echo "slink /boot $MG_VAULT 0755 0 0"
+}
+
+## build
+## rebuild the most (locally) recent kernel
+## with a freshly build initramfs
+
+mg_build() {
+
+    mg_manifest > $MANIFEST_PATH
+    if [ -z "$(ls /opt/devel)" ]; then
+        mkdir -p /opt/devel
+        mount $mg_devel /opt/devel
+    fi
+    export PATH="/opt/devel/bin:$PATH"
+
+    machine.sh cleanup
+    make -C $MG_SRC/linux-$mg_kver all
+}
+
+## install
+## copy the most recent kernel to $1 (or /boot)
+## make sure that /boot is a symlink to $1 if given
+## locate the device $1/boot lives on
+## install the bootloader to that MBR
+## 
+## XXX this doesn't install modules.
+## XXX because modules (usually) live on a readonly drive
+##
+
+mg_install(){
+    test -h /boot || ! test -e /boot || err "/boot exists and is not a symlink"
+
+    if [ $# -ge 1 ]; then
+	test -d $1 || err "$1 is not a directory"
+	rm /boot
+ 	ln -s $1 /boot
+    fi
+
+    local src=$MG_SRC/linux-$mg_kver/arch/$ARCH/boot/bzImage 
+    local destname=bzImage-$mg_kver-$DATETAG
+    local latest=/boot/bzImage-latest
+    
+    cp $src /boot/$destname
+
+    test -e $latest && rm $latest
+    ln -s $destname $latest
+
+    local dev=$(df /boot | tail -n +2 | awk '{print $1}' | sed 's/[0-9]*$//')
+    read -p "Installing to $(realpath /boot) on $dev. Enter to confirm"
+
+    lilo -b $dev
+}
+
+usage=true
+while [ $# -ge 1 ]; do
+	case $1 in
+	manifest)
+    	echo "generating $MANIFEST_PATH";      
+  		mg_manifest  > $MANIFEST_PATH && usage=false
+ 	  	;;
+	build)
+		mg_build && usage=false
+		;;
+	install)
+		shift
+		mg_install $* && usage=false
+		;;
+	*)
+		echo "unknown command: $1"
+		;;
+	esac
+	shift
+done
+if $usage; then
+	echo "Usage: /magnesium ( manifest | build | install )"
+fi

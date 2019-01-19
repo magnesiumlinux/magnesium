@@ -1,0 +1,119 @@
+#!/bin/sh
+# init.sh
+# replace ALL the bootscripts
+# in conjunction with a complete /etc/fstab
+
+trap : INT QUIT
+
+RANDOM_SEED=/vault/magnesium/randseed
+
+PROMPT=':: '
+status () {
+    echo "$PROMPT$@"
+}
+
+if [ $$ != 1 ]; then
+    # we're being called to control runsvdir
+    case "$1" in
+    "0")
+        call=/sbin/poweroff
+        ;;
+    "6")
+        call=/sbin/reboot
+        ;;
+    *)
+        exit 1
+    esac
+
+    killall5 -15 && true
+    usleep 500
+    killall5 -0 && true
+    usleep 500
+
+    status "saving seed..."
+    test -c /dev/urandom || return 0
+    test -d /var || return 0
+    sz=$(( $(cat /proc/sys/kernel/random/poolsize) / 4096 ))
+    dd if=/dev/urandom of=$RANDOM_SEED count=$sz
+
+    status "unmounting..."
+    sync; sync
+    umount -ndar
+    mount -no remount,ro /
+    echo "OK."
+
+    $call -f
+    exit 0
+fi
+
+dmesg -n1
+status   \
+"This is $(basename $0 .sh) ($(stat -c '%z' $0 | cut -d. -f1))"
+
+#openvt -c 8 >/dev/null 2>&1
+
+mount /proc
+if grep -q " single" /proc/cmdline; then
+    export PS1='exit to reboot:\w\$ '
+    exec /bin/sh
+fi
+
+status                                      "system mounts..."
+mount -a
+mount -oremount,rw /
+mkdir /dev/shm /dev/pts
+mount /dev/shm
+mount /dev/pts
+ln -s /proc/self/fd /dev/fd
+
+
+mount /vault || echo "! no /vault"
+
+usrpath=$(ls /vault/magnesium/usr-[0-9]*.squashfs | sort -r | head -n 1)
+if [ -f $usrpath ]; then
+    usrsqsh=$(realpath $usrpath)
+  
+    mkdir -p /tmp/fs
+    cp -H $usrsqsh /tmp/fs || status "! can't relocate usr.squashfs"
+    mount /tmp/fs/$(basename $usrsqsh) /usr  || status "! bad usr.squashfs"
+else
+    mount /usr || status "! no /usr"
+fi
+
+status 	                                    "configuration..."
+sysctl -p > /dev/null
+
+ifconfig lo 127.0.0.1 netmask 255.255.255.0
+route add -net 127.0.0.0 netmask 255.0.0.0 gw 127.0.0.1
+
+
+status 					    "machineconf"
+MACHINECONF=$(/bin/machine.sh dir)
+/bin/machine.sh boot || status              "! machineconf failed"
+
+
+test -f $MACHINECONF/hostname && hostname $(cat $MACHINECONF/hostname) 
+echo "127.0.0.1     $(hostname) localhost" > /etc/hosts
+
+test -f $RANDOM_SEED && cat $RANDOM_SEED > dev/urandom
+rm -f $RANDOM_SEED
+
+status                                      "services..."
+
+for d in /usr/etc/runit; do
+    test -d $d || continue
+    for sd in $(ls $d); do
+        ln -s $d/$sd /etc/runit
+    done
+done
+
+for link in $MACHINECONF/service/*; do
+    svc=$(realpath $link) && cp -a $svc /service || continue
+done
+
+# XXX down here because something above (sysctl -p?) overwrites the changes
+chgrp users /dev/fb0
+chmod g+rw /dev/fb0
+
+
+exec chpst -e $(machine.sh env) runsvdir /service ...........................................................................
